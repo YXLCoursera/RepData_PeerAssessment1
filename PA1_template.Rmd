@@ -1,195 +1,228 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-author: "Ruopeng Zhang"
-date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+title: "Reproducible Research: Peer Assessment 1 (Alternate Submission)"
+author: "Yaxin Li"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   html_document:
-    keep_md: true
+    self_contained: false
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.path = "figure/"   # <-- this creates figure/ next to your Rmd
+)
 ```
 
 ## Loading and preprocessing the data
 
-```{r load-data}
-# The dataset file is in the same folder as this Rmd
+```{r load-prep}
+# Per instructions: activity.csv is in the same folder and not zipped
 stopifnot(file.exists("activity.csv"))
 
-activity <- read.csv("activity.csv", stringsAsFactors = FALSE)
+dat <- read.csv("activity.csv", stringsAsFactors = FALSE)
 
-# Convert types
-activity$date <- as.Date(activity$date)          # YYYY-MM-DD
-activity$interval <- as.integer(activity$interval)
-activity$steps <- as.numeric(activity$steps)
+# Parse/convert columns
+dat$date <- as.Date(dat$date)              # YYYY-MM-DD
+dat$interval <- as.integer(dat$interval)
+dat$steps <- as.numeric(dat$steps)
 
-# Quick sanity checks
-str(activity)
-summary(activity)
-head(activity)
+# Basic checks
+str(dat)
+summary(dat)
+head(dat, 10)
 ```
 
 ## What is mean total number of steps taken per day?
 
-For this part of the assignment, we ignore missing values in the dataset.
+For this part of the assignment, missing values in `steps` are ignored.
 
-```{r steps-per-day}
-activity_no_na <- activity[!is.na(activity$steps), ]
+```{r totals-per-day}
+dat_nonmissing <- dat[!is.na(dat$steps), ]
 
-steps_per_day <- aggregate(steps ~ date, data = activity_no_na, FUN = sum)
+daily_totals <- aggregate(steps ~ date, data = dat_nonmissing, FUN = sum)
+colnames(daily_totals) <- c("date", "total_steps")
 
-head(steps_per_day)
-summary(steps_per_day$steps)
+head(daily_totals)
+summary(daily_totals$total_steps)
 ```
 
 ### Histogram of the total number of steps taken each day
 
-```{r hist-steps-per-day, fig.width=7, fig.height=4.5}
+```{r hist-daily, fig.width=7.5, fig.height=4.8}
+# Different look: colored histogram with borders
 hist(
-  steps_per_day$steps,
-  breaks = 20,
-  main = "Total Number of Steps Taken Each Day",
-  xlab = "Total steps per day"
+  daily_totals$total_steps,
+  breaks = 18,
+  col = "#4C78A8",          # blue fill
+  border = "white",
+  main = "Distribution of Daily Step Totals (NAs Ignored)",
+  xlab = "Total steps per day",
+  ylab = "Frequency"
 )
 ```
 
 ### Mean and median total steps per day
 
-```{r mean-median-steps-per-day}
-mean_steps_day <- mean(steps_per_day$steps)
-median_steps_day <- median(steps_per_day$steps)
+```{r mean-median-daily}
+mean_daily <- mean(daily_totals$total_steps)
+median_daily <- median(daily_totals$total_steps)
 
-mean_steps_day
-median_steps_day
+mean_daily
+median_daily
 ```
 
 ## What is the average daily activity pattern?
 
-```{r avg-steps-by-interval, fig.width=7, fig.height=4.5}
-avg_steps_interval <- aggregate(steps ~ interval, data = activity_no_na, FUN = mean)
+```{r avg-pattern}
+avg_by_interval <- aggregate(steps ~ interval, data = dat_nonmissing, FUN = mean)
+colnames(avg_by_interval) <- c("interval", "avg_steps")
 
+head(avg_by_interval)
+```
+
+### Time series plot of average steps across all days
+
+```{r ts-avg-pattern, fig.width=8, fig.height=4.6}
+# Different plot style: base line + points, custom colors
 plot(
-  avg_steps_interval$interval,
-  avg_steps_interval$steps,
+  avg_by_interval$interval,
+  avg_by_interval$avg_steps,
   type = "l",
-  main = "Average Daily Activity Pattern",
+  lwd = 2,
+  col = "#1B9E77",          # green line
+  main = "Average Steps per 5-minute Interval",
   xlab = "5-minute interval",
-  ylab = "Average number of steps"
+  ylab = "Average steps"
+)
+points(
+  avg_by_interval$interval,
+  avg_by_interval$avg_steps,
+  pch = 16,
+  cex = 0.4,
+  col = "#1B9E77"
 )
 ```
 
-### Which 5-minute interval has the maximum average number of steps?
+### 5-minute interval containing the maximum number of steps (on average)
 
-```{r max-avg-interval}
-max_idx <- which.max(avg_steps_interval$steps)
-
-max_interval <- avg_steps_interval$interval[max_idx]
-max_interval_avg_steps <- avg_steps_interval$steps[max_idx]
-
-max_interval
-max_interval_avg_steps
+```{r max-interval}
+max_row <- avg_by_interval[which.max(avg_by_interval$avg_steps), , drop = FALSE]
+max_row
 ```
 
 ## Imputing missing values
 
 ### Total number of missing values in the dataset
 
-```{r total-missing}
-total_missing <- sum(is.na(activity$steps))
-total_missing
+```{r count-missing}
+n_missing <- sum(is.na(dat$steps))
+n_missing
 ```
 
-### Impute missing `steps`
+### Imputation strategy and new dataset
 
-**Strategy:** Replace each missing `steps` value with the **mean** for that same 5-minute `interval`
-(calculated from non-missing observations).
+**Strategy (different attempt):** impute missing `steps` using the **median** number of steps for the same `interval`
+(calculated over all non-missing observations). This is simple and robust to spikes.
 
-```{r impute-missing}
-# Mean steps per interval (ignoring NA)
-mean_by_interval <- tapply(activity$steps, activity$interval, mean, na.rm = TRUE)
+```{r impute}
+median_by_interval <- tapply(dat$steps, dat$interval, median, na.rm = TRUE)
 
-# Create a new dataset with imputed steps
-activity_imputed <- activity
-activity_imputed$steps_imputed <- activity_imputed$steps
+dat_imp <- dat
+dat_imp$steps_imp <- dat_imp$steps
 
-na_rows <- is.na(activity_imputed$steps_imputed)
-activity_imputed$steps_imputed[na_rows] <- mean_by_interval[as.character(activity_imputed$interval[na_rows])]
+miss_idx <- is.na(dat_imp$steps_imp)
+dat_imp$steps_imp[miss_idx] <- median_by_interval[as.character(dat_imp$interval[miss_idx])]
 
-# Confirm no missing values remain in the imputed column
-sum(is.na(activity_imputed$steps_imputed))
+# Confirm imputation worked
+sum(is.na(dat_imp$steps_imp))
 ```
 
-### Histogram of total steps per day after imputation
+### Histogram of daily totals after imputation
 
-```{r steps-per-day-imputed}
-steps_per_day_imputed <- aggregate(steps_imputed ~ date, data = activity_imputed, FUN = sum)
+```{r totals-after-impute}
+daily_totals_imp <- aggregate(steps_imp ~ date, data = dat_imp, FUN = sum)
+colnames(daily_totals_imp) <- c("date", "total_steps_imp")
 
-head(steps_per_day_imputed)
-summary(steps_per_day_imputed$steps_imputed)
+head(daily_totals_imp)
+summary(daily_totals_imp$total_steps_imp)
 ```
 
-```{r hist-steps-per-day-imputed, fig.width=7, fig.height=4.5}
+```{r hist-after-impute, fig.width=7.5, fig.height=4.8}
 hist(
-  steps_per_day_imputed$steps_imputed,
-  breaks = 20,
-  main = "Total Number of Steps Taken Each Day (After Imputation)",
-  xlab = "Total steps per day"
+  daily_totals_imp$total_steps_imp,
+  breaks = 18,
+  col = "#F58518",          # orange fill
+  border = "white",
+  main = "Distribution of Daily Step Totals (After Imputation)",
+  xlab = "Total steps per day",
+  ylab = "Frequency"
 )
 ```
 
-### Mean and median after imputation + impact
+### Mean/median after imputation and comparison
 
-```{r mean-median-after-impute}
-mean_steps_day_imputed <- mean(steps_per_day_imputed$steps_imputed)
-median_steps_day_imputed <- median(steps_per_day_imputed$steps_imputed)
+```{r mean-median-after}
+mean_daily_imp <- mean(daily_totals_imp$total_steps_imp)
+median_daily_imp <- median(daily_totals_imp$total_steps_imp)
 
-mean_steps_day_imputed
-median_steps_day_imputed
+mean_daily_imp
+median_daily_imp
 
 impact <- data.frame(
-  metric = c("Mean", "Median"),
-  before_impute = c(mean_steps_day, median_steps_day),
-  after_impute  = c(mean_steps_day_imputed, median_steps_day_imputed),
-  difference    = c(mean_steps_day_imputed - mean_steps_day,
-                    median_steps_day_imputed - median_steps_day)
+  Metric = c("Mean", "Median"),
+  Before_Impute = c(mean_daily, median_daily),
+  After_Impute  = c(mean_daily_imp, median_daily_imp),
+  Difference    = c(mean_daily_imp - mean_daily,
+                    median_daily_imp - median_daily)
 )
 
 impact
+
+# Nicely printed table (still fully reproducible)
+knitr::kable(impact, digits = 2)
 ```
 
 ## Are there differences in activity patterns between weekdays and weekends?
 
-Use the **imputed** dataset for this part.
+Use the **imputed** dataset for this section.
 
-```{r weekday-weekend}
-# day of week: 0 = Sunday, 6 = Saturday (locale-independent)
-wday <- as.POSIXlt(activity_imputed$date)$wday
+```{r daytype}
+# Locale-independent weekday/weekend classification:
+# as.POSIXlt()$wday: 0 = Sunday, ..., 6 = Saturday
+wday <- as.POSIXlt(dat_imp$date)$wday
 
-activity_imputed$day_type <- ifelse(wday %in% c(0, 6), "weekend", "weekday")
-activity_imputed$day_type <- factor(activity_imputed$day_type, levels = c("weekday", "weekend"))
+dat_imp$day_type <- ifelse(wday %in% c(0, 6), "weekend", "weekday")
+dat_imp$day_type <- factor(dat_imp$day_type, levels = c("weekday", "weekend"))
 
-table(activity_imputed$day_type)
+table(dat_imp$day_type)
 ```
 
-### Panel plot comparing weekdays vs weekends
+### Panel plot comparing average steps per interval across weekdays and weekends
 
-```{r panel-plot, fig.width=8, fig.height=5}
-library(lattice)
+```{r panel-data}
+avg_int_day <- aggregate(steps_imp ~ interval + day_type, data = dat_imp, FUN = mean)
+colnames(avg_int_day) <- c("interval", "day_type", "avg_steps_imp")
 
-avg_interval_daytype <- aggregate(
-  steps_imputed ~ interval + day_type,
-  data = activity_imputed,
-  FUN = mean
-)
+head(avg_int_day)
+```
 
-xyplot(
-  steps_imputed ~ interval | day_type,
-  data = avg_interval_daytype,
-  type = "l",
-  layout = c(1, 2),
-  xlab = "5-minute interval",
-  ylab = "Average number of steps",
-  main = "Average Steps per Interval: Weekdays vs Weekends"
-)
+```{r panel-plot, fig.width=9, fig.height=5.2}
+# Different plotting system + color scheme: ggplot2 facets
+library(ggplot2)
+
+ggplot(avg_int_day, aes(x = interval, y = avg_steps_imp, color = day_type)) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~ day_type, ncol = 1) +
+  scale_color_manual(values = c("weekday" = "#4C78A8", "weekend" = "#E45756")) +
+  labs(
+    title = "Average Steps per 5-minute Interval: Weekdays vs Weekends",
+    x = "5-minute interval",
+    y = "Average steps (imputed dataset)",
+    color = "Day type"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
 ```
